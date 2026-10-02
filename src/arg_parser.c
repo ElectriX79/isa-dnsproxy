@@ -10,7 +10,7 @@
 
  #define PORT_INVALID 0
 
-#define TIMEOUT_INVALID 0
+ #define TIMEOUT_INVALID 0
 
  #define URL_INVALID 1
  #define URL_VALID 0
@@ -93,7 +93,7 @@ uint16_t validate_port(char *port) {
     for(int i = 1; i < argc; i++) {
         if((strcmp(argv[i], "--help") == 0) || strcmp(argv[i], "-h") == 0 ) {
             print_help();
-            return EXIT_SUCCESS;
+            exit(EXIT_SUCCESS);
         }
     }
 
@@ -163,6 +163,10 @@ uint16_t validate_port(char *port) {
                 fprintf(stderr, "No zonefile provided\n");
                 return EX_USAGE;
             }
+            if(cfg->zone_file.count == 64) {
+                fprintf(stderr, "Maximum zonefiles reached (64)");
+                return EX_USAGE;
+            }
             (cfg->zone_file).items[(cfg->zone_file).count] = argv[i+1];
             (cfg->zone_file).count++; 
             i++;
@@ -171,6 +175,10 @@ uint16_t validate_port(char *port) {
         else if(strcmp(argv[i], "-b") == 0) {
             if(i+1 >= argc) {
                 fprintf(stderr, "No blocklist file provided\n");
+                return EX_USAGE;
+            }
+            if(cfg->block_list.count == 64) {
+                fprintf(stderr, "Maximum blocklist files reached (64)");
                 return EX_USAGE;
             }
             (cfg->block_list).items[(cfg->block_list).count] = argv[i+1];
@@ -193,6 +201,7 @@ uint16_t validate_port(char *port) {
                 fprintf(stderr, "Invalid timeout format\n");
                 return EX_USAGE;
             }
+            seen_timeout = true; 
             i++;
         }
         else {
@@ -200,10 +209,20 @@ uint16_t validate_port(char *port) {
             return EX_USAGE;
         }
     }
+    if(!seen_url) {
+        fprintf(stderr, "Missing url address\n");
+        return EX_USAGE;
+    } 
 
-    if(!seen)
 
+    if(seen_addr) {
+        if((cfg->ip_addr).ss_family == AF_INET) {
+            (((struct sockaddr_in *)&cfg->ip_addr)->sin_port) = htons(cfg->port);
+        }
+        else if((cfg->ip_addr).ss_family == AF_INET6) {
+            (((struct sockaddr_in6 *)&cfg->ip_addr)->sin6_port) = htons(cfg->port);
+        }
+    }
 
     return EXIT_SUCCESS;
-
  }

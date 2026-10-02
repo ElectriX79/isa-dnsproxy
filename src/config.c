@@ -1,4 +1,4 @@
-#include "./include/config.h" 
+#include "../include/config.h" 
 #include <stdlib.h> 
 
 #define PORT_DEFAULT 53
@@ -8,6 +8,7 @@ void config_init(config_type *config) {
 
     config->timeout = TIMEOUT_DEFAULT;
     config->port = PORT_DEFAULT;
+    config->default_address = true;
 
     return;
 }

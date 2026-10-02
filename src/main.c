@@ -9,5 +9,8 @@ int main(int argc, char *argv[]) {
     config_type config = {0};
     config_init(&config);
 
-    arg_parser(argc, argv);
+    if(arg_parser(argc, argv) == EX_USAGE) {
+        return EX_USAGE;
+    }
+    
 }

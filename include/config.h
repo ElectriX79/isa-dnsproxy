@@ -27,4 +27,4 @@ typedef struct {
 } config_type; 
 
 
-void config_init(config_type *config);
+void config_init(config_type *config); 
