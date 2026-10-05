@@ -1,6 +1,10 @@
+#ifndef CONFIG_H
+#define CONFIG_H
+
 #include <stdint.h> 
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include "hash_table.h"
 #include <stdbool.h>
 
 #define MAX_FILES 64
@@ -20,6 +24,7 @@ typedef struct {
     uint16_t port;
     char *DOH_URL;
     struct sockaddr_storage ip_addr; 
+    hash_table *h_table; 
     zone_files zone_file;
     block_lists block_list; 
     bool insecure;
@@ -28,3 +33,6 @@ typedef struct {
 
 
 void config_init(config_type *config); 
+
+
+#endif

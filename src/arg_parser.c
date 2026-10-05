@@ -15,6 +15,10 @@
  #define URL_INVALID 1
  #define URL_VALID 0
 
+ void print_help(void) {
+    printf("Help usage");
+ }
+
 
  int validate_url(const char *url) {
     const char *start = NULL;
@@ -226,3 +230,5 @@ uint16_t validate_port(char *port) {
 
     return EXIT_SUCCESS;
  }
+
+
