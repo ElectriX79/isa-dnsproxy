@@ -48,7 +48,7 @@ void hashtable_destructor(hash_table *h_table) {
     return;
 }
 
-void htable_insert_element(hash_table *h_table, const char *name) {
+void htable_insert_element(hash_table *h_table, const char *name, item **h_item) {
     uint32_t hash_index = hash_fnv1a(name) % h_table->bucket_count;
     if(h_table->buckets[hash_index] == NULL) {
         item *node = calloc(1, sizeof(item));
@@ -59,12 +59,16 @@ void htable_insert_element(hash_table *h_table, const char *name) {
         node->name = calloc(strlen(name)+1, 1);
         if(node->name == NULL) {
             fprintf(stderr, "Allocation error\n");
+            free(node);
             exit(1);
         }
         strcpy(node->name, name);
         node->next_element = NULL;
         h_table->buckets[hash_index] = node;
         h_table->records_count++;
+        if(h_item != NULL) {
+            (*h_item) = node; 
+        }
     }
     else {
         item *node = calloc(1, sizeof(item));
@@ -81,15 +85,21 @@ void htable_insert_element(hash_table *h_table, const char *name) {
         node->next_element = h_table->buckets[hash_index];
         h_table->buckets[hash_index] = node;
         h_table->records_count++;
+        if(h_item != NULL) {
+            (*h_item) = node;
+        }
     }
     return;
 }
 
-bool htable_find_element(hash_table *h_table, const char *name) {
+bool htable_find_element(hash_table *h_table, const char *name, item **h_item) {
     uint32_t hash_index = hash_fnv1a(name) % h_table->bucket_count;
 
     for(item *node = h_table->buckets[hash_index]; node != NULL; node = node->next_element) {
         if(strcmp(node->name, name) == 0) {
+            if(h_item != NULL) {
+                (*h_item) = node;
+            }
             return true;
         }
     }

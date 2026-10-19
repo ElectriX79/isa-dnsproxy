@@ -7,7 +7,7 @@
 #include "hash_table.h"
 #include <stdbool.h>
 
-#define MAX_FILES 64
+#define MAX_FILES 67 // HAHA six-seven 
 
 typedef struct {
     char *items[MAX_FILES];

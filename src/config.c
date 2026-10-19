@@ -11,4 +11,4 @@ void config_init(config_type *config) {
     config->default_address = true;
 
     return;
-}
+} 

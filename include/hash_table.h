@@ -6,6 +6,7 @@
 
 struct item {
     char *name;
+    void *value;
     struct item *next_element; 
 };
 
@@ -18,10 +19,10 @@ typedef struct {
 } hash_table;
 
 
-void htable_insert_element(hash_table *h_table, const char *name);
-bool htable_find_element(hash_table *h_table, const char *name);
+void htable_insert_element(hash_table *h_table, const char *name, item **h_item);
+bool htable_find_element(hash_table *h_table, const char *name, item **h_item);
 hash_table *hashtable_constructor(uint32_t size);
 void hashtable_destructor(hash_table *h_table);
-
+static uint32_t hash_fnv1a(const char *str);
 
 #endif 

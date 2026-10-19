@@ -3,6 +3,7 @@
 #include "config.h"
 #include "arg_parser.h"
 #include "blocklist_parser.h"
+#include "zonefile_parser.h"
 #define ERROR 1
 #define SUCCESS 0
 
@@ -15,11 +16,13 @@ int main(int argc, char *argv[]) {
         return EX_USAGE;
     }
 
-    if(blocklist_parser(&config) == EX_USAGE) {
+    if(blocklist_parser(&config) != 0) {
         return EX_CONFIG; 
     }
-
-    hashtable_destructor(config.h_table);
+    zones *zn = NULL;
+    if(zonefile_parser(&config, &zn) == EX_CONFIG) {
+        return EX_CONFIG;
+    }
 
 
     return 0;

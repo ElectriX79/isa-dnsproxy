@@ -1,8 +1,7 @@
 #ifndef ARG_PARSER_H
 #define ARG_PARSER_H
 
-
-
+#include <stdint.h>
 
 void print_help(void);
 int validate_url(const char *url);

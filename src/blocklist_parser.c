@@ -28,13 +28,14 @@ int validate_token(char *token, bool first_token, char *file, int current_line) 
     uint16_t total_characters = 0;
     char *temp_token = token;
     char *to_lower = token;
-
+    
     while(*temp_token != '\0') {
         if(!containsValidChar && *temp_token != '.' && !isdigit((unsigned char)*temp_token)) {
             containsValidChar = true;
         }
         if(*temp_token == '.') {
             if(charactersPerLable == 0) {
+                fprintf(stderr,"%s:%i: Empty label\n",file, current_line);
                 return INVALID_TOKEN;
             }
             labels_cnt++;
@@ -44,15 +45,15 @@ int validate_token(char *token, bool first_token, char *file, int current_line) 
         }
         charactersPerLable++;
         if(charactersPerLable > 63) {
-            fprintf(stderr, "%s:%i Token´s label exceeded maximum length (63)\n", file, current_line);
+            fprintf(stderr, "%s:%i: Token´s label exceeded maximum length (63)\n", file, current_line);
             return INVALID_TOKEN;
         }
         if(labels_cnt > 127) {
-            fprintf(stderr, "%s%i Domain contains too many labels (limit 127)\n", file, current_line);
+            fprintf(stderr, "%s:%i: Domain contains too many labels (limit 127)\n", file, current_line);
             return INVALID_TOKEN;
         }
         if(!isalpha((unsigned char)*temp_token) && !isdigit((unsigned char)*temp_token) && *temp_token != '-' && *temp_token != '_') {
-            fprintf(stderr, "%s:%i Invalid character in domain: %c\n",file,current_line, *temp_token);
+            fprintf(stderr, "%s:%i: Invalid character in domain: %c\n",file,current_line, *temp_token);
             return INVALID_TOKEN;
         }
         temp_token++;
@@ -65,7 +66,7 @@ int validate_token(char *token, bool first_token, char *file, int current_line) 
         total_characters = strlen(token);
      }
     if(total_characters > 253) {
-        fprintf(stderr, "%s:%i Maximum domain length exceeded limit (253)\n",file, current_line);
+        fprintf(stderr, "%s:%i: Maximum domain length exceeded limit (253)\n",file, current_line);
         return INVALID_TOKEN; 
         }
     if(!containsValidChar) {
@@ -136,7 +137,7 @@ int process_line(hash_table *h_table, char *line, ssize_t len, char *file, int c
     
         while(!isspace(*temp_line) && *temp_line != '\0') {
             if(len_token > 255) {
-            fprintf(stderr, "%s:%i Domain exceeded length limit\n", file, current_line);
+            fprintf(stderr, "%s:%i: Domain exceeded length limit\n", file, current_line);
             return EX_CONFIG;
         }
             buff[len_token] = *temp_line;
@@ -154,7 +155,7 @@ int process_line(hash_table *h_table, char *line, ssize_t len, char *file, int c
             return EX_CONFIG;
         }
         else if(return_res == VALID_TOKEN) {
-            htable_insert_element(h_table, &buff[0]);
+            htable_insert_element(h_table, &buff[0],NULL);
         }
     }
     return EXIT_SUCCESS;

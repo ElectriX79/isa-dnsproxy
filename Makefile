@@ -34,7 +34,7 @@ $(OBJ_DIR):
 
 # Debug build with sanitizers: make clean && make debug
 debug: CFLAGS := $(CSTD) -Wall -Wextra -Wpedantic -O0 -g -fsanitize=address,undefined
-debug: LDFLAGS += -fsanitize=address,undefinedS
+debug: LDFLAGS += -fsanitize=address,undefinedSS
 debug: $(TARGET)
 
 clean:
