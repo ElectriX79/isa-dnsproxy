@@ -627,8 +627,6 @@ int store_record(record *rcd, parse_state *st, zone *zn, char *owner) {
 
 }
 
-
-
 void name_to_wire(const char *domain, uint8_t **dst, uint16_t *len) {
     uint8_t *buffer = malloc(256);
     if(buffer == NULL) {

@@ -268,7 +268,7 @@ def test_nested_zones(tmp_path):
                   "$ORIGIN sub.home.lan.\n$TTL 60\n@ SOA ns admin 1 2 3 4 5\nx A 1.2.3.4\n")
     assert_valid(*run_proxy(parent, child))
 
-
+    
 def test_large_zone_loads(tmp_path):
     body = "".join(f"host{i} A 10.{i >> 16 & 255}.{i >> 8 & 255}.{i & 255}\n"
                    for i in range(50_000))
