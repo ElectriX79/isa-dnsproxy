@@ -6,7 +6,9 @@
 
 #include "dns_parser.h"
 
-
+#define DNS_CLASS_IN 1
+#define DNS_TYPE_IXFR 251
+#define DNS_TYPE_AXFR 252
 
 uint16_t get_u16(const uint8_t *buff) {
     uint16_t out;
@@ -160,4 +162,39 @@ bool dns_qname_read(dns_question *qst,reader *rdr) {
     
 }
 
-bool dns_question_read()
+
+
+bool dns_question_read(dns_question *qst, reader *rdr) {
+    size_t start = rdr->position;
+
+    if(dns_qname_read(qst, rdr) == false) {
+        return false;
+    }
+    uint16_t qtype;
+    if(read_u16(rdr, &qtype) == false) {
+        return false;
+    }
+    qst->type = qtype;
+    uint16_t class;
+    if(read_u16(rdr, &class) == false) {
+        return false;
+    }
+    size_t wire_len = rdr->position - start;
+    qst->wire_len = wire_len;
+    qst->qclass = class;
+
+    return true;
+}
+
+enum parse_result validate_dns_question(dns_question *qst) {
+    enum parse_result prs_rst = PARSE_OK;
+    if(qst->qclass != DNS_CLASS_IN) {
+        prs_rst = PARSE_NOTIMP;
+    }
+    else if(qst->type == DNS_TYPE_AXFR || qst->type == DNS_TYPE_IXFR) {
+        prs_rst = PARSE_REFUSED;
+    }
+    return prs_rst;
+}
+
+
