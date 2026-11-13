@@ -110,7 +110,7 @@ uint16_t validate_port(char *port) {
             if(i + 1 < argc) {
                 if(validate_url(argv[i+1]) != 0) {
                 fprintf(stderr, "Invalid URL format \n");
-                return EX_USAGE; 
+                return EX_USAGE;               
                 }
                 seen_url = true; 
                 cfg->DOH_URL = argv[i+1];

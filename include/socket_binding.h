@@ -1,6 +1,7 @@
 #ifndef SOCKET_BINDING_H
 #define SOCKET_BINDING_H
 #include <sys/socket.h>
+#include "config.h"
 
 
 enum transport {
@@ -9,7 +10,7 @@ enum transport {
 };
 
 struct listener {
-    int socket_id;
+    int fd;
     enum transport protocol;
     int family;
     struct sockaddr_storage addr;
@@ -25,8 +26,7 @@ struct listeners {
 typedef struct listeners listeners;
 
 
-int open_sockets(listeners *list, config_type *cfg);
-int close_sockets(listeners *list);
-
+int  open_sockets(listeners *list, const config_type *cfg);
+void close_sockets(listeners *list);
 
 #endif

@@ -27,8 +27,8 @@ static int open_one(const listener *l)
     int fd = socket(l->family, tcp ? SOCK_STREAM : SOCK_DGRAM, 0);
 
     if (fd < 0
-        || (lO_IPV6, IPV6_V6ONLY, &one, sizeof one) < 0)
-        || (tcp && setsockopt(fd,->family == AF_INET6 && setsockopt(fd, IPPROT SOL_SOCKET, SO_REUSEADDR, &one, sizeof one) < 0)
+        || (l->family == AF_INET6 && setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &one, sizeof one) < 0)
+        || (tcp && setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one) < 0)
         || bind(fd, (const struct sockaddr *)&l->addr, l->len) < 0
         || (tcp && listen(fd, SOMAXCONN) < 0)
         || fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) < 0) {
@@ -47,8 +47,8 @@ int open_sockets(listeners *list, const config_type *cfg)
     struct sockaddr_storage addrs[2] = {0};
     int n = 1;
 
-    if (cfg->has_address) {
-        addrs[0] = cfg->address;
+    if (cfg->default_address) {
+        addrs[0] = cfg->ip_addr;
     } else {
         ((struct sockaddr_in *)&addrs[0])->sin_family = AF_INET;        
         ((struct sockaddr_in6 *)&addrs[1])->sin6_family = AF_INET6;        

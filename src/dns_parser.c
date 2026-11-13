@@ -9,6 +9,7 @@
 #define DNS_CLASS_IN 1
 #define DNS_TYPE_IXFR 251
 #define DNS_TYPE_AXFR 252
+#define DNS_TYPE_OPT 41
 
 uint16_t get_u16(const uint8_t *buff) {
     uint16_t out;
@@ -124,7 +125,7 @@ bool dns_header_read(dns_header *hdr ,reader *rdr) {
     return true;
 }
 
-bool dns_qname_read(dns_question *qst,reader *rdr) {
+bool dns_qname_read(dns_question *dns_qst,reader *rdr) {
     size_t index = 0;
     uint8_t byte;
     size_t wire_len = 0;
@@ -137,7 +138,7 @@ bool dns_qname_read(dns_question *qst,reader *rdr) {
             return false; 
         }
         if(byte == 0) {
-            qst->domain[index] = '\0';
+        dns_qst->domain[index] = '\0';
             return true;
         }
         wire_len++;
@@ -146,7 +147,7 @@ bool dns_qname_read(dns_question *qst,reader *rdr) {
             return false;
         }
         if(index > 0) {
-            qst->domain[index++] = '.'; 
+        dns_qst->domain[index++] = '.'; 
         }
 
         for(uint8_t i = 0; i < byte; i++) {
@@ -154,7 +155,7 @@ bool dns_qname_read(dns_question *qst,reader *rdr) {
             if(!read_u8(rdr, &chr)) {
                 return false;
             }
-            qst->domain[index++] = (char)tolower(chr); 
+        dns_qst->domain[index++] = (char)tolower(chr); 
             wire_len++;
         }
     }
@@ -164,37 +165,182 @@ bool dns_qname_read(dns_question *qst,reader *rdr) {
 
 
 
-bool dns_question_read(dns_question *qst, reader *rdr) {
+bool dns_question_read(dns_question *dns_qst, reader *rdr) {
     size_t start = rdr->position;
 
-    if(dns_qname_read(qst, rdr) == false) {
+    if(dns_qname_read(dns_qst, rdr) == false) {
         return false;
     }
     uint16_t qtype;
     if(read_u16(rdr, &qtype) == false) {
         return false;
     }
-    qst->type = qtype;
+    dns_qst->type = qtype;
     uint16_t class;
     if(read_u16(rdr, &class) == false) {
         return false;
     }
     size_t wire_len = rdr->position - start;
-    qst->wire_len = wire_len;
-    qst->qclass = class;
-
+    dns_qst->wire_len = wire_len;
+    dns_qst->qclass = class;
     return true;
 }
 
-enum parse_result validate_dns_question(dns_question *qst) {
+enum parse_result validate_dns_question(dns_question *dns_qst) {
     enum parse_result prs_rst = PARSE_OK;
-    if(qst->qclass != DNS_CLASS_IN) {
+    if(dns_qst->qclass != DNS_CLASS_IN) {
         prs_rst = PARSE_NOTIMP;
     }
-    else if(qst->type == DNS_TYPE_AXFR || qst->type == DNS_TYPE_IXFR) {
+    else if(dns_qst->type == DNS_TYPE_AXFR ||dns_qst->type == DNS_TYPE_IXFR) {
         prs_rst = PARSE_REFUSED;
     }
     return prs_rst;
 }
 
 
+bool dns_skip_bytes(reader *rdr, size_t n) {
+    if(n + rdr->position > rdr->len) {
+        return false;
+    }
+    rdr->position+= n;
+    return true;
+}
+
+
+bool dns_skip_name(reader *rdr, bool *is_root) {
+    uint8_t byte;
+    size_t wire_len = 0;
+    (*is_root) = false;
+    while(wire_len < 256) {
+        if(read_u8(rdr, &byte) == false) {
+            return false;
+        }
+        if(byte == 0) {
+            if(wire_len == 0) {
+                (*is_root) = true;
+            }
+            return true;
+        }
+        if(byte >= 192) {
+            return dns_skip_bytes(rdr, 1);
+        }
+        if(byte > 63) {
+            return false;
+        }
+        if(dns_skip_bytes(rdr, (size_t)byte) == false) {
+            return false;
+        }
+        wire_len += (1 + byte);
+    }
+    return false;
+}
+
+bool dns_skip_rr(reader *rdr, dns_record *dns_rcd) {
+    bool root;
+    if(dns_skip_name(rdr, &root) == false) {
+        return false;
+    }
+    dns_rcd->is_root = root;
+    if(read_u16(rdr, &dns_rcd->type) == false) {
+        return false;
+    }
+    if(read_u16(rdr, &dns_rcd->rclass) == false) {
+        return false;
+    }
+
+    if(dns_skip_bytes(rdr, 4) == false) {
+        return false;
+    }
+    uint16_t rdlength = 0;
+    if(read_u16(rdr, &rdlength) == false) {
+        return false;
+    }
+    if(dns_skip_bytes(rdr, rdlength) == false) {
+        return false;
+    }
+    return true;
+}
+
+
+
+enum parse_result dns_parser(const uint8_t *msg, size_t len, dns_query *query) {
+    dns_record rcd = {0};
+    reader rdr = {.buffer = msg, .len = len, .position = 0};
+    memset(query, 0, sizeof(*query)); 
+
+    enum parse_result prs_rst = PARSE_OK;
+
+    if(dns_header_read(&query->hdr, &rdr) == false) {
+        prs_rst = PARSE_DROP;
+        return prs_rst;
+    }
+
+    prs_rst = validate_dns_header(&query->hdr);
+    if(prs_rst != PARSE_OK) {
+        return prs_rst; 
+    }
+
+     if(dns_question_read(&query->qst, &rdr) == false) {
+        prs_rst = PARSE_FORMERR;
+        return prs_rst;
+     }
+     query->parsed_question = true;
+
+
+     for(uint16_t i = 0; i < query->hdr.ancount; i++) {
+        if(dns_skip_rr(&rdr, &rcd) == false) {
+            prs_rst = PARSE_FORMERR;
+            return prs_rst;
+        }
+        if(rcd.type == DNS_TYPE_OPT) {
+            prs_rst = PARSE_FORMERR;
+            return prs_rst;
+        }
+    }
+
+    for(uint16_t i = 0; i < query->hdr.nscount; i++) {
+        if(dns_skip_rr(&rdr, &rcd) == false) {
+            prs_rst = PARSE_FORMERR;
+            return prs_rst;
+        }
+        if(rcd.type == DNS_TYPE_OPT) {
+            prs_rst = PARSE_FORMERR;
+            return prs_rst;
+        }
+    }
+
+    bool opt_seen = false;
+
+
+    for(uint16_t i = 0; i < query->hdr.arcount;i++) {
+        if(dns_skip_rr(&rdr, &rcd) == false) {
+            prs_rst = PARSE_FORMERR;
+            return prs_rst;
+        }
+        if(rcd.type == DNS_TYPE_OPT) {
+            if(opt_seen) {
+                prs_rst = PARSE_FORMERR;
+                return prs_rst;
+            }
+            else if(!rcd.is_root) {
+                prs_rst = PARSE_FORMERR;
+                return prs_rst;
+            }
+            else {
+                query->udp_size = rcd.rclass;
+                opt_seen = true;
+            }
+        }
+        else {
+            continue;
+        }
+    }
+    if(opt_seen) {
+        query->has_opt = true;
+    }
+    prs_rst = validate_dns_question(&query->qst); 
+    
+
+    return prs_rst;
+
+}

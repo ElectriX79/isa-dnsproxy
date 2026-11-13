@@ -4,6 +4,8 @@
 #include "arg_parser.h"
 #include "blocklist_parser.h"
 #include "zonefile_parser.h"
+#include "event_loop.h"
+#include "socket_binding.h"
 #define ERROR 1
 #define SUCCESS 0
 
@@ -24,7 +26,13 @@ int main(int argc, char *argv[]) {
         return EX_CONFIG;
     }
 
-
-    return 0;
+    listeners list;
+    int rc = open_sockets(&list, &config);
+    if(rc != 0) {
+        return rc;
+    }
+    rc = event_loop(&list);
+    close_sockets(&list);
+    return rc;
     
 }
