@@ -31,7 +31,7 @@ int main(int argc, char *argv[]) {
     if(rc != 0) {
         return rc;
     }
-    rc = event_loop(&list);
+    rc = event_loop(&list, &config, zn);
     close_sockets(&list);
     return rc;
     

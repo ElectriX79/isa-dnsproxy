@@ -1,4 +1,4 @@
-#include "./include/doh_forward.h"
+#include "doh_forward.h"
 
 #include <ctype.h>
 #include <curl/curl.h>
@@ -29,7 +29,6 @@ static size_t write_cb(char *data, size_t size, size_t nmemb, void *userdata) {
     pending_type *req = userdata;
     size_t n = size * nmemb;
 
-    // vacsie ako najvacsia DNS sprava -> 0 zrusi prenos -> SERVFAIL
     if(req->resp_len + n > 65535) {
         return 0;
     }
@@ -136,7 +135,7 @@ pending_type* doh_submit(const uint8_t *query, size_t query_len, void *ctx) {
     if(cafile != NULL && cafile[0] != '\0') {
         curl_easy_setopt(e, CURLOPT_CAINFO, cafile);
     }
-
+    
     if(curl_multi_add_handle(multi, e) != CURLM_OK) {
         curl_easy_cleanup(e);
         memset(req, 0, sizeof(pending_type));
@@ -155,8 +154,8 @@ void doh_cancel(pending_type *req) {
     memset(req, 0, sizeof(pending_type));
 }
 
-int doh_poll(struct pollfd *fds, int n, int timeout_ms) {
-    struct curl_waitfd wfds[DOH_MAX_FDS];
+    int doh_poll(struct pollfd *fds, int n, int timeout_ms) {
+        struct curl_waitfd wfds[DOH_MAX_FDS];
     if(n > DOH_MAX_FDS) {
         n = DOH_MAX_FDS;
     }

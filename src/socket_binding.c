@@ -47,7 +47,7 @@ int open_sockets(listeners *list, const config_type *cfg)
     struct sockaddr_storage addrs[2] = {0};
     int n = 1;
 
-    if (cfg->default_address) {
+    if (!cfg->default_address) {
         addrs[0] = cfg->ip_addr;
     } else {
         ((struct sockaddr_in *)&addrs[0])->sin_family = AF_INET;        

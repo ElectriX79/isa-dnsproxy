@@ -2,13 +2,16 @@
 #define ZONEFILE_PARSER_H
 
 #include <stdint.h> 
+#include <stdbool.h>
 #include "hash_table.h"
+#include "dns_parser.h"
 
 struct record  {
     uint32_t ttl;
     uint16_t type;
     uint16_t rdlength;
     uint8_t *rdata;
+    bool skipped;        
     struct record *next; 
 };
 
@@ -22,6 +25,7 @@ struct zone {
     record *soa; 
     char *name;
     char *filename;
+    unsigned long soa_line;
 };
 
 typedef struct zone zone;
@@ -56,5 +60,7 @@ int parse_data_MX(record *rcd, parse_state *st, char *data);
 int parse_data_AAAA(record *rcd, parse_state *st, char *data);
 int zonefile_parser(config_type *cfg, zones **out);
 
+bool zone_answer(zones *zs, const dns_query *q, const uint8_t *msg, uint8_t *out, size_t *out_len);
 
-#endif 
+
+#endif

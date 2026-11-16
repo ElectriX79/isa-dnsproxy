@@ -14,9 +14,13 @@
 #include "config.h"
 #include "hash_table.h"
 #include "zonefile_parser.h"
+#include "dns_parser.h"
+#include "dns_response.h"
+#include "query_log.h"
 
 #define ZP_OK 0
 #define ZP_FAIL -1
+#define ZP_DUP 1     
 
 #define INIT_HASH_SIZE 64
 
@@ -26,7 +30,6 @@
 #define INVALID_ORIGIN -9
 #define HOSTNAME_INVALID -8
 
-/* Prototypes of functions used before their definition */
 void insert_ancestors(zone *zn, char *owner);
 int check_record_rules(record *rcd, parse_state *st, zone *zn, item *owner_item);
 int store_record(record *rcd, parse_state *st, zone *zn, char *owner);
@@ -38,36 +41,24 @@ int parse_data_CNAME(record *rcd, parse_state *st, char *data);
 int parse_data_SOA(record *rcd, parse_state *st, char *data);
 int parse_data_MX(record *rcd, parse_state *st, char *data);
 int parse_data_AAAA(record *rcd, parse_state *st, char *data);
-void store_unsupported_record(parse_state *st, zone *zn, char *owner);
+int store_unsupported_record(parse_state *st, zone *zn, char *owner, int type, uint32_t ttl);
 
 
 int lookup_type(const char *type) {
-    static const struct {
-        const char *name;
-        int value;
-        bool supported;
-    } types[] = {
-        {"A", 1, true},
-        {"NS", 2,true},
-        {"CNAME", 5,true},
-        {"SOA", 6, true},
-        {"MX", 15, true},
-        {"AAAA", 28, true},
-        {"TXT", 16, false},
-        {"SRV", 33, false},
-        {"PTR", 12, false},
-        {"CAA", 257, false}
-    };
 
-    int count = sizeof(types) / sizeof(types[0]);
-
-    for (int i = 0; i < count; i++) {
-        if (strcasecmp(type, types[i].name) == 0) {
-            return types[i].value;
+    for(int value = 1; value <= 32769; value++) {
+        if(value == 265) {
+            value = 32768;
+        }
+        if(value == 41 || (value >= 249 && value <= 255)) {
+            continue;
+        }
+        const char *name = dns_type_name((uint16_t)value);
+        if(name != NULL && strcasecmp(type, name) == 0) {
+            return value;
         }
     }
-
-    return -1; // Neznámy typ
+    return -1;
 }
 
 
@@ -410,11 +401,10 @@ int handle_record(parse_state *st, zone *zn, char *line, bool starts_with_space)
         }
     }
 
-    /* TODO: registered but unsupported type (TXT, SRV, ...) -> warning,
-       owner + ancestors still exist; only an unregistered type is an error */
+    // neregistrovany typ -> chyba; registrovany nepodporovany -> varovanie (nizsie)
     int type = lookup_type(token);
     if(type == -1) {
-        zp_error(st, "unsupported type");
+        zp_error(st, "type not registered with IANA");
         goto cleanup;
     }
     if(!st->has_default_ttl && !has_ttl) {
@@ -463,7 +453,6 @@ int handle_record(parse_state *st, zone *zn, char *line, bool starts_with_space)
         rcd->ttl = st->default_ttl;
     }
     rcd->type = type;
-    bool supported = false;
     switch(type) {
         case 1:
             if(parse_data_A(rcd, st, line) == ZP_FAIL) {
@@ -497,6 +486,7 @@ int handle_record(parse_state *st, zone *zn, char *line, bool starts_with_space)
                 goto cleanup;
             }
             zn->soa = rcd;
+            zn->soa_line = st->line_no;
             break;
         case 15:
             if(parse_data_MX(rcd, st, line) == ZP_FAIL) {
@@ -514,22 +504,18 @@ int handle_record(parse_state *st, zone *zn, char *line, bool starts_with_space)
                 goto cleanup;
             }
             break;
-        case 16:
-            zp_error(st, "warning, unsupported type: txt");
-            store_unsupported_record(st, zn, owner);
+        default: {
+            // registrovany, ale nepodporovany typ: preskoci sa, owner ale existuje
+            char warning[64];
+            snprintf(warning, sizeof(warning), "warning: unsupported type %s, record skipped", dns_type_name(type));
+            zp_error(st, warning);
+            free(rcd);
+            rcd = NULL;
+            if(store_unsupported_record(st, zn, owner, type, has_ttl ? ttl : st->default_ttl) == ZP_FAIL) {
+                goto cleanup;
+            }
             break;
-        case 12:
-            zp_error(st, "warning, unsupported type: ptr");
-            store_unsupported_record(st, zn, owner);
-            break;
-        case 33:
-            zp_error(st, "warning, unsupported type: srv");
-            store_unsupported_record(st, zn, owner);
-            break;
-        case 257:
-            zp_error(st, "warning, unsupported type: caa");
-            store_unsupported_record(st, zn, owner);
-            break;
+        }
     }
     rcd = NULL;
 
@@ -537,7 +523,7 @@ int handle_record(parse_state *st, zone *zn, char *line, bool starts_with_space)
     st->seen_record = true;
     free(st->prev_owner);
     st->prev_owner = owner;
-    owner = NULL;                   /* owned by st now */
+    owner = NULL;                
     ret_val = ZP_OK;
 
 cleanup:
@@ -575,10 +561,6 @@ int check_record_rules(record *rcd, parse_state *st, zone *zn, item *owner_item)
             return ZP_FAIL;
         }
 
-        if(r->type == rcd->type && r->rdlength == rcd-> rdlength && memcmp(r->rdata, rcd->rdata, rcd->rdlength) == 0) {
-            zp_error(st, "duplicit record not allowed");
-            return ZP_FAIL;
-        }
 
         if(r->type == 5) {
             zp_error(st, "cname cannot coexists with other records");
@@ -588,16 +570,32 @@ int check_record_rules(record *rcd, parse_state *st, zone *zn, item *owner_item)
             zp_error(st, "record with given type cannot have different ttls");
             return ZP_FAIL;
         }
+
+        if(!r->skipped && !rcd->skipped && r->type == rcd->type && r->rdlength == rcd->rdlength
+           && memcmp(r->rdata, rcd->rdata, rcd->rdlength) == 0) {
+            return ZP_DUP;
+        }
     }
     return ZP_OK;
 
 }
 
-void store_unsupported_record(parse_state *st, zone *zn, char *owner) {
-    hash_table *h_table = zn->h_table;
-    if(htable_find_element(h_table, owner, NULL) == false) {
-        htable_insert_element(h_table, owner, NULL);
+// preskoceny zaznam sa ulozi ako znacka bez rdata: owner existuje a plati pre neho
+// pravidlo "CNAME nesmie byt s inymi zaznamami"; lookup ho nikdy nevrati
+int store_unsupported_record(parse_state *st, zone *zn, char *owner, int type, uint32_t ttl) {
+    record *mark = calloc(1, sizeof(record));
+    if(mark == NULL) {
+        fprintf(stderr, "Allocation error\n");
+        exit(1);
     }
+    mark->type = (uint16_t)type;
+    mark->ttl = ttl;
+    mark->skipped = true;
+    if(store_record(mark, st, zn, owner) == ZP_FAIL) {
+        free(mark);
+        return ZP_FAIL;
+    }
+    return ZP_OK;
 }
 
 int store_record(record *rcd, parse_state *st, zone *zn, char *owner) {
@@ -611,8 +609,14 @@ int store_record(record *rcd, parse_state *st, zone *zn, char *owner) {
     if(bucket == NULL) {
         return ZP_FAIL;
     }
-    if(check_record_rules(rcd, st, zn, bucket) == ZP_FAIL) {
+    int rule = check_record_rules(rcd, st, zn, bucket);
+    if(rule == ZP_FAIL) {
         return ZP_FAIL;
+    }
+    if(rule == ZP_DUP) {
+        free(rcd->rdata);
+        free(rcd);
+        return ZP_OK;
     }
     if(first_element) {
         bucket->value = rcd;
@@ -1003,6 +1007,172 @@ int zonefile_parser(config_type *cfg, zones **out) {
         if(process_zone(subor, &zs->zones[zoneFiles_cnt], cfg->zone_file.items[zoneFiles_cnt]) != ZP_OK) {
             return EX_CONFIG;
         }
+        zone *zn = &zs->zones[zoneFiles_cnt];
+        for(uint32_t i = 0; i < zoneFiles_cnt; i++) {
+            if(strcmp(zs->zones[i].name, zn->name) == 0) {
+                fprintf(stderr, "%s:%lu: zone %s. already loaded from %s\n",
+                        zn->filename, zn->soa_line, zn->name, zs->zones[i].filename);
+                return EX_CONFIG;
+            }
+        }
     }
     return 0;
+}
+
+
+#define MAX_CNAME_HOPS 8
+
+static zone* find_zone(zones *zs, const char *name) {
+    zone *best = NULL;
+    for(uint32_t i = 0; i < zs->count; i++) {
+        zone *z = &zs->zones[i];
+        if(is_in_zone(name, z->name)) {
+            if(best == NULL || strlen(z->name) > strlen(best->name)) {
+                best = z;
+            }
+        }
+    }
+    return best;
+}
+
+static void wire_to_name(const uint8_t *wire, char *out) {
+    size_t pos = 0;
+    size_t i = 0;
+    while(wire[i] != 0) {
+        uint8_t label_len = wire[i];
+        i++;
+        if(pos > 0) {
+            out[pos++] = '.';
+        }
+        memcpy(out + pos, wire + i, label_len);
+        pos += label_len;
+        i += label_len;
+    }
+    out[pos] = '\0';
+}
+
+static bool write_rr(writer *w, const char *owner, const record *r, uint32_t ttl) {
+    uint8_t *owner_wire;
+    uint16_t owner_len;
+    name_to_wire(owner, &owner_wire, &owner_len);
+
+    bool ok = write_bytes(w, owner_wire, owner_len) && write_u16(w, r->type) && write_u16(w, DNS_CLASS_IN) && write_u32(w, ttl)&& write_u16(w, r->rdlength) && write_bytes(w, r->rdata, r->rdlength);
+
+    free(owner_wire);
+    return ok;
+}
+
+bool zone_answer(zones *zs, const dns_query *q, const uint8_t *msg, uint8_t *out, size_t *out_len) {
+    if(zs == NULL) {
+        return false;
+    }
+    zone *z = find_zone(zs, q->qst.domain);
+    if(z == NULL) {
+        return false;
+    }
+
+    writer w = {.buffer = out, .cap = DNS_MAX_MESSAGE, .position = 0};
+    write_response_header(&w, q, DNS_RCODE_NOERROR, true);   // AA = 1
+    write_question(&w, q, msg);
+
+    uint16_t qtype = q->qst.type;
+    uint16_t ancount = 0;
+    uint16_t nscount = 0;
+    uint8_t rcode = DNS_RCODE_NOERROR;
+    bool add_soa = false;
+
+    char name[256];
+    strcpy(name, q->qst.domain);
+
+    char visited[MAX_CNAME_HOPS][256];
+    int visited_count = 0;
+
+    while(1) {
+        item *it = NULL;
+        bool exists = htable_find_element(z->h_table, name, &it);
+
+
+        if(!exists) {
+            rcode = DNS_RCODE_NXDOMAIN;
+            add_soa = true;
+            break;
+        }
+        record *records = it->value;  
+
+        record *cname = NULL;
+        for(record *r = records; r != NULL; r = r->next) {
+            if(r->type == DNS_TYPE_CNAME) {
+                cname = r;
+            }
+        }
+
+        if(cname != NULL && qtype != DNS_TYPE_CNAME && qtype != DNS_TYPE_ANY && visited_count < MAX_CNAME_HOPS) {
+            if(write_rr(&w, name, cname, cname->ttl)) {
+                ancount++;
+            }
+            strcpy(visited[visited_count], name);
+            visited_count++;
+
+            char target[256];
+            wire_to_name(cname->rdata, target);
+
+            bool loop = false;
+            for(int i = 0; i < visited_count; i++) {
+                if(strcmp(visited[i], target) == 0) {
+                    loop = true;
+                }
+            }
+            zone *target_zone = find_zone(zs, target);
+
+            if(target_zone == NULL || loop) {
+                break;
+            }
+            strcpy(name, target);
+            z = target_zone;
+            continue;
+        }
+
+
+        bool found = false;
+        for(record *r = records; r != NULL; r = r->next) {
+            if(r->skipped) {
+                continue;
+            }
+            if(qtype == DNS_TYPE_ANY || r->type == qtype) {
+                if(write_rr(&w, name, r, r->ttl)) {
+                    ancount++;
+                }
+                found = true;
+            }
+        }
+        if(!found) {
+            add_soa = true;
+        }
+        break;
+    }
+
+    if(add_soa) {
+        record *soa = z->soa;
+        uint32_t minimum = get_u32(soa->rdata + soa->rdlength - 4);
+        uint32_t ttl = soa->ttl;
+        if(minimum < ttl) {
+            ttl = minimum;
+        }
+        if(write_rr(&w, z->name, soa, ttl)) {
+            nscount++;
+        }
+    }
+
+    uint16_t arcount = 0;
+    if(q->has_opt && write_opt(&w)) {
+        arcount = 1;
+    }
+
+    out[3] = (uint8_t)((out[3] & 0xF0) | rcode);
+    patch_u16(&w, 6, ancount);
+    patch_u16(&w, 8, nscount);
+    patch_u16(&w, 10, arcount);
+
+    *out_len = w.position;
+    return true;
 }

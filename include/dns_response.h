@@ -28,6 +28,16 @@ typedef struct writer {
 /* UDP limit odpovede pre daný dotaz: 512 bez OPT, inak udp_size orezaná na 512..1232 */
 size_t udp_limit(const dns_query *q);
 
+/* zapis do bufferu (pouziva aj lookup v zonach) */
+bool write_u8(writer *w, uint8_t v);
+bool write_u16(writer *w, uint16_t v);
+bool write_u32(writer *w, uint32_t v);
+bool write_bytes(writer *w, const uint8_t *data, size_t n);
+bool patch_u16(writer *w, size_t offset, uint16_t v);
+bool write_response_header(writer *w, const dns_query *q, uint8_t rcode, bool aa);
+bool write_question(writer *w, const dns_query *q, const uint8_t *msg);
+bool write_opt(writer *w);
+
 size_t dns_build_simple(const dns_query *q, const uint8_t *msg, uint8_t rcode, uint8_t *out, size_t cap);
 
 #endif /* DNS_RESPONSE_H */

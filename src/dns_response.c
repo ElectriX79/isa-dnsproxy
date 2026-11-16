@@ -2,6 +2,8 @@
 
 #include "dns_response.h"
 
+#define DNS_OFFSET_ARCOUNT 10
+
 void put_u16(uint8_t *p, uint16_t v) {
     p[0] = (uint8_t)(v >> 8);
     p[1] = (uint8_t)(v & 0xFF);
@@ -57,25 +59,22 @@ bool patch_u16(writer *w, size_t offset, uint16_t v) {
 }
 
 
-#define DNS_OFFSET_ARCOUNT 10
-
-
-static bool write_response_header(writer *w, const dns_query *q, uint8_t rcode, bool aa) {
+bool write_response_header(writer *w, const dns_query *q, uint8_t rcode, bool aa) {
     uint16_t flags = 0;
-    flags |= (uint16_t)(1u << 15);                          /* QR */
-    flags |= (uint16_t)((q->hdr.opcode & 0xF) << 11);        /* OPCODE */
-    flags |= (uint16_t)((aa ? 1u : 0u) << 10);              /* AA */
-    flags |= (uint16_t)((q->hdr.rd ? 1u : 0u) << 8);        /* RD */
-    flags |= (uint16_t)(1u << 7);                           /* RA */
-    flags |= (uint16_t)((q->hdr.cd ? 1u : 0u) << 4);        /* CD */
-    flags |= (uint16_t)(rcode & 0xF);                       /* RCODE */
+    flags |= (uint16_t)(1u << 15);                        
+    flags |= (uint16_t)((q->hdr.opcode & 0xF) << 11);      
+    flags |= (uint16_t)((aa ? 1u : 0u) << 10);           
+    flags |= (uint16_t)((q->hdr.rd ? 1u : 0u) << 8);       
+    flags |= (uint16_t)(1u << 7);                         
+    flags |= (uint16_t)((q->hdr.cd ? 1u : 0u) << 4);       
+    flags |= (uint16_t)(rcode & 0xF);                     
 
     return write_u16(w, q->hdr.id)
         && write_u16(w, flags)
-        && write_u16(w, q->parsed_question ? 1 : 0)         /* QDCOUNT */
-        && write_u16(w, 0)                                  /* ANCOUNT */
-        && write_u16(w, 0)                                  /* NSCOUNT */
-        && write_u16(w, 0);                                 /* ARCOUNT */
+        && write_u16(w, q->parsed_question ? 1 : 0)        
+        && write_u16(w, 0)                               
+        && write_u16(w, 0)                                
+        && write_u16(w, 0);                                
 }
 
 bool write_question(writer *w, const dns_query *q, const uint8_t *msg) {
@@ -93,7 +92,6 @@ bool write_opt(writer *w) {
         && write_u16(w, 0);
 }
 
-/* ---------- verejné funkcie ---------- */
 
 size_t udp_limit(const dns_query *q) {
     if (!q->has_opt) {

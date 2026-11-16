@@ -164,7 +164,6 @@ int process_line(hash_table *h_table, char *line, ssize_t len, char *file, int c
 
 }
 
-
 uint32_t count_records(FILE *subor) { 
     int endfile;
     uint32_t records_count = 0;
@@ -224,8 +223,8 @@ int blocklist_parser(config_type *cfg) {
             if(return_resp == EX_CONFIG) {
                 return EX_CONFIG;
             }
-            free(line);
         }
+        free(line);
         fclose(subor);
     }
     return EXIT_SUCCESS;

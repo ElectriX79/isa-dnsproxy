@@ -1,6 +1,12 @@
 build/zonefile_parser.o: src/zonefile_parser.c include/config.h \
- include/hash_table.h include/hash_table.h include/zonefile_parser.h
+ include/hash_table.h include/hash_table.h include/zonefile_parser.h \
+ include/dns_parser.h include/dns_parser.h include/dns_response.h \
+ include/dns_response.h
 include/config.h:
 include/hash_table.h:
 include/hash_table.h:
 include/zonefile_parser.h:
+include/dns_parser.h:
+include/dns_parser.h:
+include/dns_response.h:
+include/dns_response.h:
