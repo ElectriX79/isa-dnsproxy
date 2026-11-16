@@ -16,7 +16,21 @@
  #define URL_VALID 0
 
  void print_help(void) {
-    printf("Help usage");
+    printf(
+        "Usage: ./isa-dnsproxy -u DOH_URL [-p PORT] [-a ADDRESS] [-z ZONEFILE]... [-b BLOCKLIST]... [-w TIMEOUT] [--insecure]\n"
+        "       ./isa-dnsproxy -h | --help\n"
+        "\n"
+        "Filtering DNS proxy: answers from local zones, blocks names from blocklists,\n"
+        "forwards other queries over DNS-over-HTTPS (RFC 8484).\n"
+        "\n"
+        "  -u DOH_URL     upstream DoH URL (https://, or http:// for local testing), mandatory\n"
+        "  -p PORT        UDP and TCP port 1..65535 (default 53)\n"
+        "  -a ADDRESS     literal IPv4 or IPv6 address to listen on (default: all local addresses)\n"
+        "  -z ZONEFILE    zone file, repeatable\n"
+        "  -b BLOCKLIST   blocklist, repeatable\n"
+        "  -w TIMEOUT     upstream timeout in seconds 1..3600 (default 3)\n"
+        "  --insecure     disable TLS certificate and hostname verification\n"
+        "  -h, --help     print this help and exit\n");
  }
 
 

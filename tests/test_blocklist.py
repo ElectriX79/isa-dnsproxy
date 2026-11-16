@@ -6,8 +6,7 @@ with EX_CONFIG (78) and print `<file>:<line>: <message>` on stderr; a valid
 one must NOT fail that way. Blocking of actual queries is not tested here
 (add dig-based tests once the proxy answers queries).
 
-Run:  pytest -v tests/test_blocklist.py
-      ISA_BIN=./isa-dnsproxy pytest -v tests/test_blocklist.py
+Run:  ISA_BIN=./isa-dnsproxy python3 -m unittest discover -s tests -p test_blocklist.py -v
 """
 
 import os
@@ -17,7 +16,9 @@ import subprocess
 import time
 from pathlib import Path
 
-import pytest
+import unittest
+
+from dnstest import ProxyTestCase, params, slow
 
 BIN = os.environ.get("ISA_BIN", "./isa-dnsproxy")
 UPSTREAM = "https://cloudflare-dns.com/dns-query"
@@ -129,51 +130,6 @@ VALID_CASES = {
 }
 
 
-@pytest.mark.parametrize("name", VALID_CASES.keys())
-def test_valid_blocklist(tmp_path, name):
-    path = write(tmp_path, f"{name}.txt", VALID_CASES[name])
-    assert_valid(*run_proxy(path))
-
-
-def test_crlf_line_endings(tmp_path):
-    path = write(
-        tmp_path, "crlf.txt",
-        b"# header\r\n0.0.0.0 ads.example.com tracker.example.net\r\n\r\nlast.example.com\r\n",
-        binary=True,
-    )
-    assert_valid(*run_proxy(path))
-
-
-def test_crlf_with_comment(tmp_path):
-    path = write(tmp_path, "crlf_comment.txt", b"ads.example.com # x\r\n", binary=True)
-    assert_valid(*run_proxy(path))
-
-
-def test_many_names_on_one_line(tmp_path):
-    names = " ".join(f"n{i}.example.com" for i in range(30000))
-    path = write(tmp_path, "one_long_line.txt", "0.0.0.0 " + names + "\n")
-    assert_valid(*run_proxy(path, wait=3))
-
-
-def test_multiple_blocklists(tmp_path):
-    a = write(tmp_path, "a.txt", "ads.example.com\n")
-    b = write(tmp_path, "b.txt", "0.0.0.0 tracker.example.net\n")
-    c = write(tmp_path, "c.txt", "")
-    assert_valid(*run_proxy(a, b, c))
-
-
-def test_200k_entries_load_fast(tmp_path):
-    lines = "".join(f"0.0.0.0 host{i}.ads{i % 97}.example.com\n" for i in range(200_000))
-    path = write(tmp_path, "big.txt", lines)
-    start = time.monotonic()
-    rc, out, err = run_proxy(path, wait=5)
-    elapsed = time.monotonic() - start
-    assert_valid(rc, out, err)
-    # If the program already prints "listening on", it must do so within 5 s.
-    if "listening on" in err:
-        assert elapsed < 5.5
-
-
 # --------------------------------------------------------------------------- invalid files
 # (content, line number of the error)
 
@@ -199,53 +155,106 @@ INVALID_CASES = {
 }
 
 
-@pytest.mark.parametrize("name", INVALID_CASES.keys())
-def test_invalid_blocklist(tmp_path, name):
-    content, line = INVALID_CASES[name]
-    path = write(tmp_path, f"{name}.txt", content)
-    rc, out, err = run_proxy(path)
-    assert_config_error(rc, err, path, line)
-    assert out == ""
+class TestBlocklist(ProxyTestCase):
+    pass
 
+    @params("name", VALID_CASES.keys())
+    def test_valid_blocklist(self, name):
+        tmp_path = self.tmp_dir()
+        path = write(tmp_path, f"{name}.txt", VALID_CASES[name])
+        assert_valid(*run_proxy(path))
 
-def test_invalid_crlf_line_number(tmp_path):
-    path = write(tmp_path, "crlf_bad.txt", b"ok.example.com\r\nbad..name\r\n", binary=True)
-    rc, _, err = run_proxy(path)
-    assert_config_error(rc, err, path, 2)
+    def test_crlf_line_endings(self):
+        tmp_path = self.tmp_dir()
+        path = write(
+            tmp_path, "crlf.txt",
+            b"# header\r\n0.0.0.0 ads.example.com tracker.example.net\r\n\r\nlast.example.com\r\n",
+            binary=True,
+        )
+        assert_valid(*run_proxy(path))
 
+    def test_crlf_with_comment(self):
+        tmp_path = self.tmp_dir()
+        path = write(tmp_path, "crlf_comment.txt", b"ads.example.com # x\r\n", binary=True)
+        assert_valid(*run_proxy(path))
 
-def test_error_in_second_file(tmp_path):
-    good = write(tmp_path, "good.txt", "ads.example.com\n")
-    bad = write(tmp_path, "bad.txt", "ok.example.com\nbad..name\n")
-    rc, _, err = run_proxy(good, bad)
-    assert_config_error(rc, err, bad, 2)
+    def test_many_names_on_one_line(self):
+        tmp_path = self.tmp_dir()
+        names = " ".join(f"n{i}.example.com" for i in range(30000))
+        path = write(tmp_path, "one_long_line.txt", "0.0.0.0 " + names + "\n")
+        assert_valid(*run_proxy(path, wait=3))
 
+    def test_multiple_blocklists(self):
+        tmp_path = self.tmp_dir()
+        a = write(tmp_path, "a.txt", "ads.example.com\n")
+        b = write(tmp_path, "b.txt", "0.0.0.0 tracker.example.net\n")
+        c = write(tmp_path, "c.txt", "")
+        assert_valid(*run_proxy(a, b, c))
 
-def test_missing_file(tmp_path):
-    path = tmp_path / "does_not_exist.txt"
-    rc, _, err = run_proxy(path)
-    assert rc == EX_CONFIG, err
-    assert str(path) in err
+    def test_200k_entries_load_fast(self):
+        tmp_path = self.tmp_dir()
+        lines = "".join(f"0.0.0.0 host{i}.ads{i % 97}.example.com\n" for i in range(200_000))
+        path = write(tmp_path, "big.txt", lines)
+        start = time.monotonic()
+        rc, out, err = run_proxy(path, wait=5)
+        elapsed = time.monotonic() - start
+        assert_valid(rc, out, err)
+        # If the program already prints "listening on", it must do so within 5 s.
+        if "listening on" in err:
+            assert elapsed < 5.5
 
+    @params("name", INVALID_CASES.keys())
+    def test_invalid_blocklist(self, name):
+        tmp_path = self.tmp_dir()
+        content, line = INVALID_CASES[name]
+        path = write(tmp_path, f"{name}.txt", content)
+        rc, out, err = run_proxy(path)
+        assert_config_error(rc, err, path, line)
+        assert out == ""
 
-def test_directory_is_rejected(tmp_path):
-    d = tmp_path / "a_directory"
-    d.mkdir()
-    rc, _, err = run_proxy(d)
-    assert rc == EX_CONFIG, err
+    def test_invalid_crlf_line_number(self):
+        tmp_path = self.tmp_dir()
+        path = write(tmp_path, "crlf_bad.txt", b"ok.example.com\r\nbad..name\r\n", binary=True)
+        rc, _, err = run_proxy(path)
+        assert_config_error(rc, err, path, 2)
 
+    def test_error_in_second_file(self):
+        tmp_path = self.tmp_dir()
+        good = write(tmp_path, "good.txt", "ads.example.com\n")
+        bad = write(tmp_path, "bad.txt", "ok.example.com\nbad..name\n")
+        rc, _, err = run_proxy(good, bad)
+        assert_config_error(rc, err, bad, 2)
 
-def test_dev_null_is_not_regular(tmp_path):
-    rc, _, err = run_proxy("/dev/null")
-    assert rc == EX_CONFIG, err
-
-
-@pytest.mark.skipif(os.geteuid() == 0, reason="root can read any file")
-def test_unreadable_file(tmp_path):
-    path = write(tmp_path, "secret.txt", "ads.example.com\n")
-    path.chmod(0o000)
-    try:
+    def test_missing_file(self):
+        tmp_path = self.tmp_dir()
+        path = tmp_path / "does_not_exist.txt"
         rc, _, err = run_proxy(path)
         assert rc == EX_CONFIG, err
-    finally:
-        path.chmod(0o644)
+        assert str(path) in err
+
+    def test_directory_is_rejected(self):
+        tmp_path = self.tmp_dir()
+        d = tmp_path / "a_directory"
+        d.mkdir()
+        rc, _, err = run_proxy(d)
+        assert rc == EX_CONFIG, err
+
+    def test_dev_null_is_not_regular(self):
+        tmp_path = self.tmp_dir()
+        rc, _, err = run_proxy("/dev/null")
+        assert rc == EX_CONFIG, err
+
+    @unittest.skipIf(os.geteuid() == 0, reason="root can read any file")
+    def test_unreadable_file(self):
+        tmp_path = self.tmp_dir()
+        path = write(tmp_path, "secret.txt", "ads.example.com\n")
+        path.chmod(0o000)
+        try:
+            rc, _, err = run_proxy(path)
+            assert rc == EX_CONFIG, err
+        finally:
+            path.chmod(0o644)
+
+
+if __name__ == "__main__":
+    unittest.main()

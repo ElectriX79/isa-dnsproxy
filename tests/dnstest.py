@@ -7,8 +7,19 @@ Shared helpers for the runtime tests of isa-dnsproxy.
   * Proxy       - starts isa-dnsproxy, waits for the "listening on" lines,
                   collects the query log, sends UDP/TCP queries, stops it
 
-Run the tests from the project root:  pytest -v tests
-Another binary:                       ISA_BIN=./isa-dnsproxy pytest -v tests
+  * ProxyTestCase, params, slow - small unittest helpers (per-test temporary
+                  directory, parametrised cases as subtests, skipping slow tests)
+
+Only the Python standard library is used (unittest), so the tests run in the
+unmodified dev-envs devShell. Run from the project root:
+
+    make test                                   (all tests)
+    make test-fast                              (without the slow TCP idle test)
+    ISA_BIN=./isa-dnsproxy python3 -m unittest discover -s tests -v
+    ISA_BIN=./isa-dnsproxy python3 -m unittest discover -s tests -p test_runtime.py -v
+
+AI usage: the test suite was written with the help of an AI assistant
+(Claude, Anthropic), see "Use of AI" in README.md.
 """
 
 import os
@@ -20,8 +31,12 @@ import ssl
 import struct
 import subprocess
 import threading
+import tempfile
 import time
+import unittest
+from functools import wraps
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 BIN = os.environ.get("ISA_BIN", "./isa-dnsproxy")
 
@@ -468,3 +483,57 @@ ads.example.com
 both.home.lan
 lan
 """
+
+
+# --------------------------------------------------------------------------- unittest helpers
+
+# ISA_FAST=1 (make test-fast) skips tests that wait for long timeouts
+slow = unittest.skipIf(os.environ.get("ISA_FAST") == "1", "slow test, skipped by ISA_FAST=1")
+
+
+def params(names, values):
+    """Run one test method for every value, each value as its own subtest.
+
+    `names` is a comma separated list of argument names; with one name every
+    value is the argument itself, with more names a tuple of arguments.
+    Decorators can be stacked; the cases are then all combinations.
+    Every case gets fresh per-test resources (setUp is run again and the
+    cleanups of the previous case are done), so cases do not share state."""
+    names = [n.strip() for n in names.split(",")]
+
+    def decorator(test):
+        innermost = not getattr(test, "is_params_wrapper", False)
+
+        @wraps(test)
+        def run_all(self, **outer):
+            for value in values:
+                args = dict(zip(names, (value,) if len(names) == 1 else value))
+                with self.subTest(**args):
+                    if innermost:
+                        self.doCleanups()
+                        self.setUp()
+                    test(self, **outer, **args)
+        run_all.is_params_wrapper = True
+        return run_all
+    return decorator
+
+
+class ProxyTestCase(unittest.TestCase):
+    """Base class: temporary directories and proxies that are cleaned up after each test."""
+
+    def tmp_dir(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        return Path(d.name)
+
+    def proxy_for(self, url, *args, **kw):
+        """Start a Proxy that is stopped at the end of the test."""
+        p = Proxy(url, *args, **kw)
+        self.addCleanup(p.kill)
+        return p
+
+    @classmethod
+    def class_tmp_dir(cls):
+        d = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(d.cleanup)
+        return Path(d.name)

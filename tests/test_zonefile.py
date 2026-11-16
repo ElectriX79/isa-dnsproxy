@@ -12,8 +12,7 @@ Every case is derived from the "Zone file format" section of the assignment.
 Cases whose expected result is an interpretation of the assignment, not an
 explicit sentence in it, are marked with  # INTERPRETATION.
 
-Run:  pytest -v tests/test_zonefile.py
-      ISA_BIN=./isa-dnsproxy pytest -v tests/test_zonefile.py
+Run:  ISA_BIN=./isa-dnsproxy python3 -m unittest discover -s tests -p test_zonefile.py -v
 """
 
 import os
@@ -22,7 +21,9 @@ import socket
 import subprocess
 from pathlib import Path
 
-import pytest
+import unittest
+
+from dnstest import ProxyTestCase, params, slow
 
 BIN = os.environ.get("ISA_BIN", "./isa-dnsproxy")
 UPSTREAM = "https://cloudflare-dns.com/dns-query"
@@ -231,49 +232,7 @@ VALID_CASES = {
 }
 
 
-@pytest.mark.parametrize("name", VALID_CASES.keys())
-def test_valid_zone(tmp_path, name):
-    path = write(tmp_path, f"{name}.zone", VALID_CASES[name])
-    assert_valid(*run_proxy(path), path)
-
-
-def test_crlf_line_endings(tmp_path):
-    content = SPEC_EXAMPLE.replace("\n", "\r\n").encode()
-    path = write(tmp_path, "crlf.zone", content, binary=True)
-    assert_valid(*run_proxy(path))
-
-
-def test_crlf_with_comment(tmp_path):
-    content = (HDR + "www A 1.2.3.4 ; x\n").replace("\n", "\r\n").encode()
-    path = write(tmp_path, "crlf_comment.zone", content, binary=True)
-    assert_valid(*run_proxy(path))
-
-
-def test_unsupported_type_prints_warning(tmp_path):
-    path = write(tmp_path, "txt.zone", HDR + 'www TXT "x"\n')
-    rc, out, err = run_proxy(path)
-    assert_valid(rc, out, err)
-    assert err.strip() != "", "a skipped record MUST produce a warning on stderr"
-
-
-def test_multiple_zone_files(tmp_path):
-    a = write(tmp_path, "a.zone", SPEC_EXAMPLE)
-    b = write(tmp_path, "b.zone", "$ORIGIN example.test.\n$TTL 60\n@ SOA ns admin 1 2 3 4 5\n")
-    assert_valid(*run_proxy(a, b))
-
-
-def test_nested_zones(tmp_path):
-    parent = write(tmp_path, "parent.zone", SPEC_EXAMPLE)
-    child = write(tmp_path, "child.zone",
-                  "$ORIGIN sub.home.lan.\n$TTL 60\n@ SOA ns admin 1 2 3 4 5\nx A 1.2.3.4\n")
-    assert_valid(*run_proxy(parent, child))
-
     
-def test_large_zone_loads(tmp_path):
-    body = "".join(f"host{i} A 10.{i >> 16 & 255}.{i >> 8 & 255}.{i & 255}\n"
-                   for i in range(50_000))
-    path = write(tmp_path, "big.zone", HDR + body)
-    assert_valid(*run_proxy(path, wait=5))
 
 
 # =========================================================================== INVALID
@@ -423,76 +382,131 @@ INVALID_CASES = {
 }
 
 
-@pytest.mark.parametrize("name", INVALID_CASES.keys())
-def test_invalid_zone(tmp_path, name):
-    content, line = INVALID_CASES[name]
-    path = write(tmp_path, f"{name}.zone", content)
-    rc, out, err = run_proxy(path)
-    assert_config_error(rc, err, path, line)
-    assert out == ""
-
-
-def test_invalid_crlf_line_number(tmp_path):
-    content = (HDR + "www A 1.2.3.4\nbad A 1.2.3\n").replace("\n", "\r\n").encode()
-    path = write(tmp_path, "crlf_bad.zone", content, binary=True)
-    rc, _, err = run_proxy(path)
-    assert_config_error(rc, err, path, HDR_LINES + 2)
-
-
-def test_error_in_second_file(tmp_path):
-    good = write(tmp_path, "good.zone", SPEC_EXAMPLE)
-    bad = write(tmp_path, "bad.zone", HDR + "www A 1.2.3\n")
-    rc, _, err = run_proxy(good, bad)
-    assert_config_error(rc, err, bad, HDR_LINES + 1)
-
-
-def test_missing_file(tmp_path):
-    path = tmp_path / "does_not_exist.zone"
-    rc, _, err = run_proxy(path)
-    assert rc == EX_CONFIG, err
-    assert str(path) in err
-
-
-def test_directory_is_rejected(tmp_path):
-    d = tmp_path / "a_directory"
-    d.mkdir()
-    rc, _, err = run_proxy(d)
-    assert rc == EX_CONFIG, err
-
-
-def test_dev_null_is_not_regular(tmp_path):
-    rc, _, err = run_proxy("/dev/null")
-    assert rc == EX_CONFIG, err
-
-
-@pytest.mark.skipif(os.geteuid() == 0, reason="root can read any file")
-def test_unreadable_file(tmp_path):
-    path = write(tmp_path, "secret.zone", SPEC_EXAMPLE)
-    path.chmod(0o000)
-    try:
-        rc, _, err = run_proxy(path)
-        assert rc == EX_CONFIG, err
-    finally:
-        path.chmod(0o644)
-
-
-def test_binary_garbage(tmp_path):
-    path = write(tmp_path, "garbage.zone", bytes(range(256)) * 4, binary=True)
-    rc, _, err = run_proxy(path)
-    assert rc == EX_CONFIG, f"expected exit 78, got {rc}, stderr:\n{err}"
-
-
-def test_very_long_line(tmp_path):
-    path = write(tmp_path, "long.zone", HDR + "www A " + "1" * 100_000 + "\n")
-    rc, _, err = run_proxy(path)
-    assert_config_error(rc, err, path, HDR_LINES + 1)
-
-
 # Two files with the same apex: the assignment does not say what happens.
 # Rejecting it at start-up is the safest choice; change this test if you
 # decide otherwise and document the decision in README.md.   # INTERPRETATION
-def test_duplicate_apex_in_two_files(tmp_path):
-    a = write(tmp_path, "a.zone", SPEC_EXAMPLE)
-    b = write(tmp_path, "b.zone", SPEC_EXAMPLE)
-    rc, _, err = run_proxy(a, b)
-    assert rc == EX_CONFIG, f"expected exit 78, got {rc}, stderr:\n{err}"
+
+
+class TestZonefile(ProxyTestCase):
+    pass
+
+    @params("name", VALID_CASES.keys())
+    def test_valid_zone(self, name):
+        tmp_path = self.tmp_dir()
+        path = write(tmp_path, f"{name}.zone", VALID_CASES[name])
+        assert_valid(*run_proxy(path), path)
+
+    def test_crlf_line_endings(self):
+        tmp_path = self.tmp_dir()
+        content = SPEC_EXAMPLE.replace("\n", "\r\n").encode()
+        path = write(tmp_path, "crlf.zone", content, binary=True)
+        assert_valid(*run_proxy(path))
+
+    def test_crlf_with_comment(self):
+        tmp_path = self.tmp_dir()
+        content = (HDR + "www A 1.2.3.4 ; x\n").replace("\n", "\r\n").encode()
+        path = write(tmp_path, "crlf_comment.zone", content, binary=True)
+        assert_valid(*run_proxy(path))
+
+    def test_unsupported_type_prints_warning(self):
+        tmp_path = self.tmp_dir()
+        path = write(tmp_path, "txt.zone", HDR + 'www TXT "x"\n')
+        rc, out, err = run_proxy(path)
+        assert_valid(rc, out, err)
+        assert err.strip() != "", "a skipped record MUST produce a warning on stderr"
+
+    def test_multiple_zone_files(self):
+        tmp_path = self.tmp_dir()
+        a = write(tmp_path, "a.zone", SPEC_EXAMPLE)
+        b = write(tmp_path, "b.zone", "$ORIGIN example.test.\n$TTL 60\n@ SOA ns admin 1 2 3 4 5\n")
+        assert_valid(*run_proxy(a, b))
+
+    def test_nested_zones(self):
+        tmp_path = self.tmp_dir()
+        parent = write(tmp_path, "parent.zone", SPEC_EXAMPLE)
+        child = write(tmp_path, "child.zone",
+                      "$ORIGIN sub.home.lan.\n$TTL 60\n@ SOA ns admin 1 2 3 4 5\nx A 1.2.3.4\n")
+        assert_valid(*run_proxy(parent, child))
+
+    def test_large_zone_loads(self):
+        tmp_path = self.tmp_dir()
+        body = "".join(f"host{i} A 10.{i >> 16 & 255}.{i >> 8 & 255}.{i & 255}\n"
+                       for i in range(50_000))
+        path = write(tmp_path, "big.zone", HDR + body)
+        assert_valid(*run_proxy(path, wait=5))
+
+    @params("name", INVALID_CASES.keys())
+    def test_invalid_zone(self, name):
+        tmp_path = self.tmp_dir()
+        content, line = INVALID_CASES[name]
+        path = write(tmp_path, f"{name}.zone", content)
+        rc, out, err = run_proxy(path)
+        assert_config_error(rc, err, path, line)
+        assert out == ""
+
+    def test_invalid_crlf_line_number(self):
+        tmp_path = self.tmp_dir()
+        content = (HDR + "www A 1.2.3.4\nbad A 1.2.3\n").replace("\n", "\r\n").encode()
+        path = write(tmp_path, "crlf_bad.zone", content, binary=True)
+        rc, _, err = run_proxy(path)
+        assert_config_error(rc, err, path, HDR_LINES + 2)
+
+    def test_error_in_second_file(self):
+        tmp_path = self.tmp_dir()
+        good = write(tmp_path, "good.zone", SPEC_EXAMPLE)
+        bad = write(tmp_path, "bad.zone", HDR + "www A 1.2.3\n")
+        rc, _, err = run_proxy(good, bad)
+        assert_config_error(rc, err, bad, HDR_LINES + 1)
+
+    def test_missing_file(self):
+        tmp_path = self.tmp_dir()
+        path = tmp_path / "does_not_exist.zone"
+        rc, _, err = run_proxy(path)
+        assert rc == EX_CONFIG, err
+        assert str(path) in err
+
+    def test_directory_is_rejected(self):
+        tmp_path = self.tmp_dir()
+        d = tmp_path / "a_directory"
+        d.mkdir()
+        rc, _, err = run_proxy(d)
+        assert rc == EX_CONFIG, err
+
+    def test_dev_null_is_not_regular(self):
+        tmp_path = self.tmp_dir()
+        rc, _, err = run_proxy("/dev/null")
+        assert rc == EX_CONFIG, err
+
+    @unittest.skipIf(os.geteuid() == 0, reason="root can read any file")
+    def test_unreadable_file(self):
+        tmp_path = self.tmp_dir()
+        path = write(tmp_path, "secret.zone", SPEC_EXAMPLE)
+        path.chmod(0o000)
+        try:
+            rc, _, err = run_proxy(path)
+            assert rc == EX_CONFIG, err
+        finally:
+            path.chmod(0o644)
+
+    def test_binary_garbage(self):
+        tmp_path = self.tmp_dir()
+        path = write(tmp_path, "garbage.zone", bytes(range(256)) * 4, binary=True)
+        rc, _, err = run_proxy(path)
+        assert rc == EX_CONFIG, f"expected exit 78, got {rc}, stderr:\n{err}"
+
+    def test_very_long_line(self):
+        tmp_path = self.tmp_dir()
+        path = write(tmp_path, "long.zone", HDR + "www A " + "1" * 100_000 + "\n")
+        rc, _, err = run_proxy(path)
+        assert_config_error(rc, err, path, HDR_LINES + 1)
+
+    def test_duplicate_apex_in_two_files(self):
+        tmp_path = self.tmp_dir()
+        a = write(tmp_path, "a.zone", SPEC_EXAMPLE)
+        b = write(tmp_path, "b.zone", SPEC_EXAMPLE)
+        rc, _, err = run_proxy(a, b)
+        assert rc == EX_CONFIG, f"expected exit 78, got {rc}, stderr:\n{err}"
+
+
+if __name__ == "__main__":
+    unittest.main()

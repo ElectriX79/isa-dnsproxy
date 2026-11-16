@@ -5,7 +5,7 @@
 #
 # Targets:
 #   make                      build ./isa-dnsproxy
-#   make test                 build and run the automated tests (pytest, see README.md)
+#   make test                 build and run the automated tests (Python unittest, see README.md)
 #   make test-fast            the same without the slow tests (TCP idle timeout)
 #   make debug                build with debug symbols and sanitizers
 #   make clean                remove build artifacts
@@ -53,17 +53,16 @@ debug: CFLAGS := -std=c17 -Wall -Wextra -Wpedantic -O0 -g -fsanitize=address,und
 debug: LDFLAGS := -fsanitize=address,undefined
 debug: $(TARGET)
 
-# automated tests: black-box tests of the built executable (pytest)
+# automated tests: black-box tests of the built executable, Python standard
+# library only (unittest), so they run in the unmodified devShell
 test: $(TARGET)
-	@$(PYTHON) -c "import pytest" 2>/dev/null || \
-	  { echo "make test: pytest is not available for $(PYTHON), see the Testing section of README.md" >&2; exit 1; }
-	ISA_BIN=./$(TARGET) $(PYTHON) -m pytest -v -rs $(TEST_DIR)
+	ISA_BIN=./$(TARGET) $(PYTHON) -m unittest discover -s $(TEST_DIR) -v
 
 test-fast: $(TARGET)
-	ISA_BIN=./$(TARGET) $(PYTHON) -m pytest -v -rs -m "not slow" $(TEST_DIR)
+	ISA_FAST=1 ISA_BIN=./$(TARGET) $(PYTHON) -m unittest discover -s $(TEST_DIR) -v
 
 clean:
-	rm -rf $(OBJ_DIR) $(TARGET) $(TEST_DIR)/__pycache__ .pytest_cache
+	rm -rf $(OBJ_DIR) $(TARGET) $(TEST_DIR)/__pycache__
 
 # submission archive: sources, tests, docs; no build artifacts, .git or caches
 zip: clean
